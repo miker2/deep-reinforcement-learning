@@ -13,7 +13,7 @@ BATCH_SIZE = 64         # minibatch size
 GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR = 5e-4               # learning rate
-UPDATE_EVERY = 4        # how often to update the network
+UPDATE_EVERY = 5        # how often to update the network
 # PER Hyperparameters
 PER_ALPHA = 0.6         # prioritization exponent (0=uniform, 1=full)
 PER_BETA = 0.4          # initial importance sampling exponent
@@ -37,8 +37,9 @@ class Agent():
 
     def __init__(self, state_size, action_size, seed,
                  hidden_layer_sizes=[256, 128, 64],
-                 dropout_prob=0.25, epsilon=PER_EPSILON,
-                 per_alpha=0., per_beta=0., per_beta_increment=0.):
+                 dropout_prob=0.25, use_double_dqn=False,
+                 per_epsilon=PER_EPSILON, per_alpha=0.,
+                 per_beta=0., per_beta_increment=0.):
         """Initialize an Agent object.
 
         Params
@@ -53,7 +54,8 @@ class Agent():
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(seed)
-        self.epsilon = epsilon
+        self.use_double_dqn = use_double_dqn
+        self.per_epsilon = per_epsilon
 
 
         # Q-Network
@@ -133,15 +135,24 @@ class Agent():
 
         # Get max predicted Q values (for next states) from target model
         with torch.no_grad():
-            # Compute the Q-values for the next-states, given the optimal action (based
-            # on the target network
-            next_q_values = self.qnetwork_target(next_states).detach().max(1, keepdim=True)[0]
+            if self.use_double_dqn:
+                # For Double DQN, we need to select the action with the highest Q-value from our
+                # local model, and then use that action to get the Q-value from the target model
+                _, best_actions = self.qnetwork_local(next_states).detach().max(1, keepdim=True)
+                # Use the best action to get the Q-value from the target model
+                # This is the Double DQN trick
+                next_q_values = self.qnetwork_target(next_states).detach().gather(1, best_actions)
+            else:
+                # For standard DQN, we just use the target model to get the Q-values (based on the
+                # optimal actions) for the next states
+                next_q_values = self.qnetwork_target(next_states).detach().max(1, keepdim=True)[0]
+
             # Compute Q targets for current states
             target_q_values = rewards + (gamma * next_q_values * (1 - dones))
 
         # Compute loss
 
-        # Calculate element-wise loss
+        # Calculate element-wise loss so we can apply the weights
         elementwise_loss = F.mse_loss(q_values, target_q_values, reduction='none')
         # Apply importance sampling weights (weights are 1.0 if alpha=0)
         loss = (weights * elementwise_loss).mean()
@@ -151,7 +162,7 @@ class Agent():
             # Calculate absolute TD errors |Q_targets - Q_expected|
             td_errors = (target_q_values - q_values).abs().detach().cpu().numpy()
             # Add epsilon and update priorities
-            new_priorities = td_errors + self.epsilon
+            new_priorities = td_errors + self.per_epsilon
             self.memory.update_priorities(indices, new_priorities.flatten())
 
         # backpropagation
