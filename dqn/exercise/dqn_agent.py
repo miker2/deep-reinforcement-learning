@@ -1,12 +1,11 @@
-import numpy as np
 import random
-from collections import namedtuple, deque
+from collections import deque, namedtuple
 
-from model import QNetwork
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from model import QNetwork
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
 BATCH_SIZE = 64         # minibatch size
@@ -20,7 +19,9 @@ PER_BETA = 0.4          # initial importance sampling exponent
 PER_BETA_INCREMENT = 0  # beta annealing factor per sample step
 PER_EPSILON = 1e-4      # small value added to priorities to ensure non-zero probability
 
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device(
+    "mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu"
+)
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -29,17 +30,25 @@ elif torch.backends.cuda.is_available():
     print(torch.cuda.get_device_name(device))
 else:
     device = torch.device("cpu")
-    print ("No accelerators found. Using CPU")
+    print("No accelerators found. Using CPU")
 
 
-class Agent():
+class Agent:
     """Interacts with and learns from the environment."""
 
-    def __init__(self, state_size, action_size, seed,
-                 hidden_layer_sizes=[256, 128, 64],
-                 dropout_prob=0.25, use_double_dqn=False,
-                 per_epsilon=PER_EPSILON, per_alpha=0.,
-                 per_beta=0., per_beta_increment=0.):
+    def __init__(
+        self,
+        state_size,
+        action_size,
+        seed,
+        hidden_layer_sizes=[256, 128, 64],
+        dropout_prob=0.25,
+        use_double_dqn=False,
+        per_epsilon=PER_EPSILON,
+        per_alpha=0.0,
+        per_beta=0.0,
+        per_beta_increment=0.0,
+    ):
         """Initialize an Agent object.
 
         Params
@@ -57,20 +66,27 @@ class Agent():
         self.use_double_dqn = use_double_dqn
         self.per_epsilon = per_epsilon
 
-
         # Q-Network
-        self.qnetwork_local = QNetwork(state_size, action_size, seed,
-                                       hidden_layer_sizes, dropout_prob).to(device)
-        self.qnetwork_target = QNetwork(state_size, action_size, seed,
-                                       hidden_layer_sizes, dropout_prob).to(device)
+        self.qnetwork_local = QNetwork(
+            state_size, action_size, seed, hidden_layer_sizes, dropout_prob
+        ).to(device)
+        self.qnetwork_target = QNetwork(
+            state_size, action_size, seed, hidden_layer_sizes, dropout_prob
+        ).to(device)
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
 
         # Replay memory
-        self.memory = PrioritizedReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed,
-                                                alpha=per_alpha, beta=per_beta,
-                                                beta_increment_per_sampling=per_beta_increment,
-                                                device=device) # Pass device
+        self.memory = PrioritizedReplayBuffer(
+            action_size,
+            BUFFER_SIZE,
+            BATCH_SIZE,
+            seed,
+            alpha=per_alpha,
+            beta=per_beta,
+            beta_increment_per_sampling=per_beta_increment,
+            device=device,
+        )  # Pass device
 
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
@@ -92,12 +108,11 @@ class Agent():
         if self.t_step == 0:
             # If enough samples are available in memory, get random subset and learn
             if len(self.memory) > BATCH_SIZE:
-
                 # Sample with priorities, get experiences, weights, and indices
                 experiences, weights, indices = self.memory.sample()
                 self.learn(experiences, GAMMA, weights, indices)
 
-    def act(self, state, eps=0.):
+    def act(self, state, eps=0.0):
         """Returns actions for given state as per current policy.
 
         Params
@@ -153,7 +168,7 @@ class Agent():
         # Compute loss
 
         # Calculate element-wise loss so we can apply the weights
-        elementwise_loss = F.mse_loss(q_values, target_q_values, reduction='none')
+        elementwise_loss = F.mse_loss(q_values, target_q_values, reduction="none")
         # Apply importance sampling weights (weights are 1.0 if alpha=0)
         loss = (weights * elementwise_loss).mean()
 
@@ -184,14 +199,23 @@ class Agent():
             tau (float): interpolation parameter
         """
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+            target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
 
 
 class PrioritizedReplayBuffer:
     """Fixed-size buffer to store experience tuples and priorities."""
 
-    def __init__(self, action_size, buffer_size, batch_size, seed,
-                 alpha, beta, beta_increment_per_sampling, device):
+    def __init__(
+        self,
+        action_size,
+        buffer_size,
+        batch_size,
+        seed,
+        alpha,
+        beta,
+        beta_increment_per_sampling,
+        device,
+    ):
         """Initialize a PrioritizedReplayBuffer object.
 
         Params
@@ -213,16 +237,18 @@ class PrioritizedReplayBuffer:
         self.beta = beta
         self.beta_increment_per_sampling = beta_increment_per_sampling
         self.device = device
-        self.epsilon = PER_EPSILON # Use global constant
+        self.epsilon = PER_EPSILON  # Use global constant
 
         # Use lists for memory and priorities, manage as circular buffer
         self.memory = [None] * buffer_size
         self.priorities = np.zeros(buffer_size)
-        self.pos = 0 # Current insertion position
-        self.current_size = 0 # Number of elements currently in buffer
+        self.pos = 0  # Current insertion position
+        self.current_size = 0  # Number of elements currently in buffer
 
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
-        self.max_priority = 1.0 # Initialize max priority
+        self.experience = namedtuple(
+            "Experience", field_names=["state", "action", "reward", "next_state", "done"]
+        )
+        self.max_priority = 1.0  # Initialize max priority
 
     def add(self, state, action, reward, next_state, done):
         """Add a new experience to memory with maximal priority."""
@@ -242,19 +268,19 @@ class PrioritizedReplayBuffer:
     def sample(self):
         """Sample a batch of experiences from memory based on priorities."""
         if self.current_size == 0:
-            return None, None, None # Or raise error
+            return None, None, None  # Or raise error
 
         if self.alpha == 0:
             # Uniform sampling
             indices = np.random.choice(self.current_size, self.batch_size, replace=True)
-            weights = np.ones(self.batch_size) # All weights are 1.0
+            weights = np.ones(self.batch_size)  # All weights are 1.0
         else:
             # Prioritized sampling
             # Get priorities of existing experiences
-            priorities_subset = self.priorities[:self.current_size]
+            priorities_subset = self.priorities[: self.current_size]
 
             # Calculate probabilities P(i) = p_i^alpha / sum(p_k^alpha)
-            scaled_priorities = priorities_subset ** self.alpha
+            scaled_priorities = priorities_subset**self.alpha
             prob_sum = np.sum(scaled_priorities)
             if prob_sum == 0:  # Handle edge case and avoid division by zero
                 prob_dist = np.ones(self.current_size) / self.current_size
@@ -262,13 +288,17 @@ class PrioritizedReplayBuffer:
                 prob_dist = scaled_priorities / prob_sum
 
             # Sample indices based on probability distribution
-            indices = np.random.choice(self.current_size, self.batch_size, p=prob_dist, replace=True)
+            indices = np.random.choice(
+                self.current_size, self.batch_size, p=prob_dist, replace=True
+            )
 
             # Calculate Importance Sampling (IS) weights w_i = (N * P(i))^-beta / max(w_j)
             total_n = self.current_size
             weights = (total_n * prob_dist[indices]) ** (-self.beta)
             # Normalize weights by max weight for stability
-            weights /= np.max(weights) if np.max(weights) > 0 else 1.0 # Avoid division by zero if max_weight is 0
+            weights /= (
+                np.max(weights) if np.max(weights) > 0 else 1.0
+            )  # Avoid division by zero if max_weight is 0
 
             # Anneal beta towards 1.0
             self.beta = min(1.0, self.beta + self.beta_increment_per_sampling)
@@ -277,11 +307,33 @@ class PrioritizedReplayBuffer:
         experiences = [self.memory[idx] for idx in indices]
 
         # Convert experiences to tensors
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(self.device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(self.device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(self.device)
+        states = (
+            torch.from_numpy(np.vstack([e.state for e in experiences if e is not None]))
+            .float()
+            .to(self.device)
+        )
+        actions = (
+            torch.from_numpy(np.vstack([e.action for e in experiences if e is not None]))
+            .long()
+            .to(self.device)
+        )
+        rewards = (
+            torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None]))
+            .float()
+            .to(self.device)
+        )
+        next_states = (
+            torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None]))
+            .float()
+            .to(self.device)
+        )
+        dones = (
+            torch.from_numpy(
+                np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)
+            )
+            .float()
+            .to(self.device)
+        )
 
         # Convert weights to tensor
         weights_tensor = torch.from_numpy(weights).float().unsqueeze(1).to(self.device)
@@ -303,9 +355,9 @@ class PrioritizedReplayBuffer:
         for idx, priority in zip(indices, priorities):
             # Ensure priority is positive and reflects the TD error + epsilon
             # The input 'priorities' should already be abs(TD error) + epsilon
-            if idx < self.current_size: # Ensure index is valid
+            if idx < self.current_size:  # Ensure index is valid
                 self.priorities[idx] = priority
-                self.max_priority = max(self.max_priority, priority) # Update max priority seen
+                self.max_priority = max(self.max_priority, priority)  # Update max priority seen
 
     def __len__(self):
         """Return the current size of internal memory."""

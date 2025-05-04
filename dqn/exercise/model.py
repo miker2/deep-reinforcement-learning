@@ -2,14 +2,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-device = torch.device("mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device(
+    "mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu"
+)
+
 
 class QNetwork(nn.Module):
     """Actor (Policy) Model."""
 
-    def __init__(self, state_size, action_size, seed,
-                 hidden_layer_sizes=[512, 256, 128],
-                 dropout_prob=0.25):
+    def __init__(
+        self,
+        state_size,
+        action_size,
+        seed,
+        hidden_layer_sizes=[512, 256, 128],
+        dropout_prob=0.25,
+    ):
         """Initialize parameters and build model.
         Params
         ======
@@ -61,4 +69,3 @@ class QNetwork(nn.Module):
         x = self.output(x)
 
         return x
-

@@ -214,9 +214,7 @@ class PrioritizedReplayBuffer:
         self.dones[buffer_idx] = done
 
         # Add priority to SumTree using the buffer index
-        self.tree.add(
-            current_max_priority
-        )  # `add` internally uses self.write for buffer_idx
+        self.tree.add(current_max_priority)  # `add` internally uses self.write for buffer_idx
 
         # Update pointer and size (relative to logical buffer_size)
         self.ptr = (self.ptr + 1) % self.buffer_size
@@ -231,9 +229,7 @@ class PrioritizedReplayBuffer:
         batch_states = np.zeros((current_batch_size, self.state_size), dtype=np.float32)
         batch_actions = np.zeros((current_batch_size, 1), dtype=np.int64)
         batch_rewards = np.zeros((current_batch_size, 1), dtype=np.float32)
-        batch_next_states = np.zeros(
-            (current_batch_size, self.state_size), dtype=np.float32
-        )
+        batch_next_states = np.zeros((current_batch_size, self.state_size), dtype=np.float32)
         batch_dones = np.zeros((current_batch_size, 1), dtype=np.float32)
 
         idxs = np.empty((current_batch_size,), dtype=np.int32)  # Store buffer indices
@@ -277,9 +273,7 @@ class PrioritizedReplayBuffer:
                 # Ensure buffer_idx is valid (safeguard, though `get` tries to handle it)
                 buffer_idx = min(buffer_idx, self.size - 1)
 
-                sampling_probability = (
-                    priority / total_priority if total_priority > 0 else 0
-                )
+                sampling_probability = priority / total_priority if total_priority > 0 else 0
                 weight = (
                     (self.size * sampling_probability) ** (-self.beta)
                     if sampling_probability > 0
@@ -298,9 +292,7 @@ class PrioritizedReplayBuffer:
             if max_weight > 0:
                 is_weights /= max_weight
             else:
-                print(
-                    f"Warning: max_weight is {max_weight}, cannot normalize IS weights."
-                )
+                print(f"Warning: max_weight is {max_weight}, cannot normalize IS weights.")
                 is_weights.fill(1.0)
 
         # Convert batch to PyTorch tensors
@@ -369,9 +361,7 @@ if __name__ == "__main__":
     print(f"Using device: {DEVICE}")
     print(f"Requested Buffer Size: {BUFFER_SIZE}")
 
-    buffer = PrioritizedReplayBuffer(
-        STATE_SIZE, ACTION_SIZE, BUFFER_SIZE, BATCH_SIZE, SEED, DEVICE
-    )
+    buffer = PrioritizedReplayBuffer(STATE_SIZE, ACTION_SIZE, BUFFER_SIZE, BATCH_SIZE, SEED, DEVICE)
     print(f"Internal SumTree Capacity (Power of 2): {buffer.tree.tree_capacity}")
 
     def create_dummy_experience(state_size, action_size):
