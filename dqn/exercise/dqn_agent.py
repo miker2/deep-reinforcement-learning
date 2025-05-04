@@ -17,7 +17,7 @@ UPDATE_EVERY = 4        # how often to update the network
 # PER Hyperparameters
 PER_ALPHA = 0.6         # prioritization exponent (0=uniform, 1=full)
 PER_BETA = 0.4          # initial importance sampling exponent
-PER_BETA_INCREMENT = 0.001 # beta annealing factor per sample step
+PER_BETA_INCREMENT = 0  # beta annealing factor per sample step
 PER_EPSILON = 1e-4      # small value added to priorities to ensure non-zero probability
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu")
@@ -30,7 +30,7 @@ elif torch.backends.cuda.is_available():
 else:
     device = torch.device("cpu")
     print ("No accelerators found. Using CPU")
-print(device)
+
 
 class Agent():
     """Interacts with and learns from the environment."""
@@ -211,7 +211,7 @@ class PrioritizedReplayBuffer:
         self.current_size = 0 # Number of elements currently in buffer
 
         self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
-        self.max_priority = 0.0 # Initialize max priority
+        self.max_priority = 1.0 # Initialize max priority
 
     def add(self, state, action, reward, next_state, done):
         """Add a new experience to memory with maximal priority."""
