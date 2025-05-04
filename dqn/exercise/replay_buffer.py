@@ -34,6 +34,7 @@ class SumTree:
         tree_size = 2 * self.tree_capacity - 1
         self.sum_tree = np.zeros(tree_size)
         self.min_tree = np.full(tree_size, float("inf"))
+        self.max_tree = np.full(tree_size, -float("inf"))
 
         self.size = 0
 
@@ -60,6 +61,7 @@ class SumTree:
 
             self.sum_tree[parent] = self.sum_tree[left] + self.sum_tree[right]
             self.min_tree[parent] = min(self.min_tree[left], self.min_tree[right])
+            self.max_tree[parent] = max(self.max_tree[left], self.max_tree[right])
             idx = parent
 
     def _retrieve(self, idx, s):
@@ -70,18 +72,27 @@ class SumTree:
         if left >= len(self.sum_tree):  # Reached a leaf node
             return idx
 
-        if s <= self.sum_tree[left]:
-            return self._retrieve(left, s)
-        else:
-            return self._retrieve(right, s - self.sum_tree[left])
+        return (
+            self._retrieve(left, s)
+            if s <= self.sum_tree[left]
+            else self._retrieve(right, s - self.sum_tree[left])
+        )
 
+    @property
     def total(self):
         return self.sum_tree[0]
 
-    def get_min_priority(self):
+    @property
+    def min_priority(self):
         # The minimum is tracked correctly even with padding,
         # as unused padded leaves remain 'inf'
         return self.min_tree[0] if self.size > 0 else 0.0
+
+    @property
+    def max_priority(self):
+        # The maximum is tracked correctly even with padding,
+        # as unused padded leaves remain '-inf'
+        return self.max_tree[0] if self.size > 0 else 0.0
 
     def update(self, buffer_idx, p):
         """
@@ -103,6 +114,7 @@ class SumTree:
 
         self.sum_tree[tree_idx] = p
         self.min_tree[tree_idx] = p
+        self.max_tree[tree_idx] = p
         self._propagate_upwards(tree_idx)
 
     def add(self, p):
@@ -125,7 +137,7 @@ class SumTree:
         Gets the leaf index, priority, and corresponding *buffer* index
         for a given sample value 's'.
         """
-        if self.total() == 0:
+        if self.total == 0:
             print("Warning: Sampling from SumTree with total priority zero.")
             # Need to decide how to handle this - raise error or return default?
             # Returning buffer index 0 as a placeholder, but might need adjustment.
@@ -202,8 +214,7 @@ class PrioritizedReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
         # Assign high priority initially (e.g., 1.0)
-        current_max_priority = 1.0
-        # Optional: Track actual max if necessary
+        current_max_priority = max(1.0, self.tree.max_priority)
 
         # Store experience in numpy arrays
         buffer_idx = self.ptr  # Get current write index (buffer index)
@@ -214,7 +225,7 @@ class PrioritizedReplayBuffer:
         self.dones[buffer_idx] = done
 
         # Add priority to SumTree using the buffer index
-        self.tree.add(current_max_priority)  # `add` internally uses self.write for buffer_idx
+        self.tree.add(current_max_priority)
 
         # Update pointer and size (relative to logical buffer_size)
         self.ptr = (self.ptr + 1) % self.buffer_size
@@ -235,7 +246,7 @@ class PrioritizedReplayBuffer:
         idxs = np.empty((current_batch_size,), dtype=np.int32)  # Store buffer indices
         is_weights = np.empty((current_batch_size, 1), dtype=np.float32)
 
-        total_priority = self.tree.total()
+        total_priority = self.tree.total
         if total_priority == 0:
             print("Warning: Total priority is zero. Sampling uniformly.")
             # Sample uniformly from valid *buffer* indices
@@ -254,7 +265,7 @@ class PrioritizedReplayBuffer:
             priority_segment = total_priority / current_batch_size
             self.beta = np.min([1.0, self.beta + self.beta_increment_per_sampling])
 
-            min_priority = self.tree.get_min_priority()
+            min_priority = self.tree.min_priority
             min_prob = min_priority / total_priority if total_priority > 0 else 0
 
             if self.size > 0 and min_prob > 0:
@@ -379,8 +390,9 @@ if __name__ == "__main__":
         buffer.add(*exp)
 
     print(f"Buffer size: {len(buffer)}")
-    print(f"SumTree total priority: {buffer.tree.total():.2f}")
-    print(f"SumTree min priority (initial): {buffer.tree.get_min_priority():.6f}")
+    print(f"SumTree total priority: {buffer.tree.total:.2f}")
+    print(f"SumTree min priority (initial): {buffer.tree.min_priority:.6f}")
+    print(f"SumTree max priority (initial): {buffer.tree.max_priority:.6f}")
 
     if len(buffer) >= BATCH_SIZE:
         print("\nSampling a batch...")
@@ -401,9 +413,9 @@ if __name__ == "__main__":
         # Pass buffer indices to update_priorities
         buffer.update_priorities(idxs, errors)
         print("Priorities updated.")
-        print(f"SumTree total priority after update: {buffer.tree.total():.2f}")
-        new_min_p = buffer.tree.get_min_priority()
-        print(f"SumTree min priority after update: {new_min_p:.6f}")
+        print(f"SumTree total priority after update: {buffer.tree.total:.2f}")
+        print(f"SumTree min priority after update: {buffer.tree.min_priority:.6f}")
+        print(f"SumTree max priority after update: {buffer.tree.max_priority:.6f}")
 
         min_calc_p = (np.min(np.abs(errors)) + buffer.epsilon) ** buffer.alpha
         print(f"Expected min priority (approx):   {min_calc_p:.6f}")

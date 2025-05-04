@@ -8,16 +8,16 @@ import torch.optim as optim
 from model import QNetwork
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 64         # minibatch size
-GAMMA = 0.99            # discount factor
-TAU = 1e-3              # for soft update of target parameters
-LR = 5e-4               # learning rate
-UPDATE_EVERY = 5        # how often to update the network
+BATCH_SIZE = 64  # minibatch size
+GAMMA = 0.99  # discount factor
+TAU = 1e-3  # for soft update of target parameters
+LR = 5e-4  # learning rate
+UPDATE_EVERY = 5  # how often to update the network
 # PER Hyperparameters
-PER_ALPHA = 0.6         # prioritization exponent (0=uniform, 1=full)
-PER_BETA = 0.4          # initial importance sampling exponent
+PER_ALPHA = 0.6  # prioritization exponent (0=uniform, 1=full)
+PER_BETA = 0.4  # initial importance sampling exponent
 PER_BETA_INCREMENT = 0  # beta annealing factor per sample step
-PER_EPSILON = 1e-4      # small value added to priorities to ensure non-zero probability
+PER_EPSILON = 1e-4  # small value added to priorities to ensure non-zero probability
 
 device = torch.device(
     "mps" if torch.backends.mps.is_available() else "cuda:0" if torch.cuda.is_available() else "cpu"
