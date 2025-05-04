@@ -36,10 +36,18 @@ class SumTree:
         self.min_tree = np.full(tree_size, float("inf"))
         self.max_tree = np.full(tree_size, -float("inf"))
 
-        self.size = 0
+        self._size = 0
 
     def __len__(self):
-        return self.size
+        return self._size
+
+    @property
+    def size(self):
+        return self._size
+
+    @property
+    def ptr(self):
+        return self.write_idx
 
     def _left(self, idx):
         """Returns the left child index of a given node."""
@@ -51,8 +59,7 @@ class SumTree:
 
     def _propagate_upwards(self, idx):
         """
-        Propagates changes (sum and min) up the tree starting from a leaf node index.
-        Simplified because tree_capacity is a power of 2.
+        Propagates changes (sum/min/max) up the tree starting from a leaf node index.
         """
         while idx > 0:
             parent = (idx - 1) // 2
@@ -130,7 +137,7 @@ class SumTree:
 
         # Cycle the write pointer based on the *requested* buffer capacity
         self.write_idx = (self.write_idx + 1) % self.buffer_capacity
-        self.size = min(self.size + 1, self.buffer_capacity)
+        self._size = min(self._size + 1, self.buffer_capacity)
 
     def get(self, s):
         """
@@ -161,7 +168,7 @@ class SumTree:
                 buffer_idx + self.tree_capacity - 1
             )  # Recalculate tree_idx based on clamped buffer_idx
 
-        return (tree_idx, self.sum_tree[tree_idx], buffer_idx)
+        return (self.sum_tree[tree_idx], buffer_idx)
 
 
 class PrioritizedReplayBuffer:
@@ -191,14 +198,14 @@ class PrioritizedReplayBuffer:
         self.batch_size = batch_size
         self.seed = random.seed(seed)
         self.device = device
-        self.ptr = 0
-        self.size = 0  # current number of elements in buffer (up to buffer_size)
 
         state_type = np.int64 if discrete_states else np.float32
+        self.torch_state_t = torch.int64 if discrete_states else torch.float32
         action_type = np.int64 if discrete_actions else np.float32
+        self.torch_act_t = torch.int64 if discrete_actions else torch.float32
 
         self.states = np.zeros((buffer_size, state_size), dtype=state_type)
-        self.actions = np.zeros((buffer_size, 1), dtype=action_type)
+        self.actions = np.zeros((buffer_size, 1), dtype=self.action_type)
         self.rewards = np.zeros((buffer_size, 1), dtype=np.float32)
         self.next_states = np.zeros((buffer_size, state_size), dtype=state_type)
         self.dones = np.zeros((buffer_size, 1), dtype=np.int8)
@@ -209,6 +216,10 @@ class PrioritizedReplayBuffer:
             field_names=["state", "action", "reward", "next_state", "done"],
         )
 
+    @property
+    def size(self):
+        return self.tree.size
+
     def _get_priority(self, error):
         return (np.abs(error) + self.epsilon) ** self.alpha
 
@@ -217,7 +228,7 @@ class PrioritizedReplayBuffer:
         current_max_priority = max(1.0, self.tree.max_priority)
 
         # Store experience in numpy arrays
-        buffer_idx = self.ptr  # Get current write index (buffer index)
+        buffer_idx = self.tree.ptr  # Get current write index (buffer index)
         self.states[buffer_idx] = state
         self.actions[buffer_idx] = action
         self.rewards[buffer_idx] = reward
@@ -227,21 +238,19 @@ class PrioritizedReplayBuffer:
         # Add priority to SumTree using the buffer index
         self.tree.add(current_max_priority)
 
-        # Update pointer and size (relative to logical buffer_size)
-        self.ptr = (self.ptr + 1) % self.buffer_size
-        self.size = min(self.size + 1, self.buffer_size)
-
     def sample(self):
         if self.size == 0:
             raise BufferError("Cannot sample from an empty buffer.")
 
         current_batch_size = min(self.batch_size, self.size)
 
-        batch_states = np.zeros((current_batch_size, self.state_size), dtype=np.float32)
-        batch_actions = np.zeros((current_batch_size, 1), dtype=np.int64)
-        batch_rewards = np.zeros((current_batch_size, 1), dtype=np.float32)
-        batch_next_states = np.zeros((current_batch_size, self.state_size), dtype=np.float32)
-        batch_dones = np.zeros((current_batch_size, 1), dtype=np.float32)
+        batch_states = np.zeros((current_batch_size, self.state_size), dtype=self.states.dtype)
+        batch_actions = np.zeros((current_batch_size, self.action_size), dtype=self.actions.dtype)
+        batch_rewards = np.zeros((current_batch_size, 1), dtype=self.rewards.dtype)
+        batch_next_states = np.zeros(
+            (current_batch_size, self.state_size), dtype=self.next_states.dtype
+        )
+        batch_dones = np.zeros((current_batch_size, 1), dtype=self.dones.dtype)
 
         idxs = np.empty((current_batch_size,), dtype=np.int32)  # Store buffer indices
         is_weights = np.empty((current_batch_size, 1), dtype=np.float32)
@@ -278,8 +287,7 @@ class PrioritizedReplayBuffer:
                 b = priority_segment * (i + 1)
                 s = random.uniform(a, b)
 
-                # get returns (tree_idx, priority, buffer_idx)
-                (_, priority, buffer_idx) = self.tree.get(s)
+                priority, buffer_idx = self.tree.get(s)
 
                 # Ensure buffer_idx is valid (safeguard, though `get` tries to handle it)
                 buffer_idx = min(buffer_idx, self.size - 1)
@@ -307,10 +315,12 @@ class PrioritizedReplayBuffer:
                 is_weights.fill(1.0)
 
         # Convert batch to PyTorch tensors
-        states_tensor = torch.from_numpy(batch_states).float().to(self.device)
-        actions_tensor = torch.from_numpy(batch_actions).long().to(self.device)
+        states_tensor = torch.from_numpy(batch_states).type(self.torch_state_t).to(self.device)
+        actions_tensor = torch.from_numpy(batch_actions).type(self.torch_act_t).to(self.device)
         rewards_tensor = torch.from_numpy(batch_rewards).float().to(self.device)
-        next_states_tensor = torch.from_numpy(batch_next_states).float().to(self.device)
+        next_states_tensor = (
+            torch.from_numpy(batch_next_states).type(self.torch_state_t).to(self.device)
+        )
         dones_tensor = torch.from_numpy(batch_dones).float().to(self.device)
         is_weights_tensor = torch.from_numpy(is_weights).float().to(self.device)
 
@@ -374,6 +384,7 @@ if __name__ == "__main__":
 
     buffer = PrioritizedReplayBuffer(STATE_SIZE, ACTION_SIZE, BUFFER_SIZE, BATCH_SIZE, SEED, DEVICE)
     print(f"Internal SumTree Capacity (Power of 2): {buffer.tree.tree_capacity}")
+    print("Capacity: ", buffer.buffer_size, buffer.tree.buffer_capacity)
 
     def create_dummy_experience(state_size, action_size):
         state = np.random.randn(state_size).astype(np.float32)
@@ -383,6 +394,9 @@ if __name__ == "__main__":
         done = random.choice([True, False])
         return state, action, reward, next_state, done
 
+    print("Buffer sizes: ", buffer.size, buffer.tree.size)
+    print("write index: ", buffer.tree.ptr, buffer.tree.write_idx)
+
     print("Adding experiences...")
     num_to_add = BUFFER_SIZE // 2  # Fill partially
     for i in range(num_to_add):
@@ -390,6 +404,8 @@ if __name__ == "__main__":
         buffer.add(*exp)
 
     print(f"Buffer size: {len(buffer)}")
+    print("Buffer sizes: ", buffer.size, buffer.tree._size)
+    print("write index: ", buffer.tree.ptr, buffer.tree.write_idx)
     print(f"SumTree total priority: {buffer.tree.total:.2f}")
     print(f"SumTree min priority (initial): {buffer.tree.min_priority:.6f}")
     print(f"SumTree max priority (initial): {buffer.tree.max_priority:.6f}")
